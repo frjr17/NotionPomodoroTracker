@@ -35,6 +35,8 @@ A `justfile` is provided (`sudo dnf install just`), or use cargo directly:
 | `just lint`  | `cargo clippy -- -D warnings` |
 | `just fmt`   | `cargo fmt`                 |
 | `just build` | `cargo build --release`     |
+| `just install` | installs to `~/.local/bin` + desktop entry |
+| `just uninstall` | removes both              |
 
 ## Running
 

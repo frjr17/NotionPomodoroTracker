@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Notion Pomodoro Tracker
+Comment=Track Pomodoros on your Notion tasks, offline-first
+Exec=@BINDIR@/notion-pomodoro-tracker
+Icon=alarm-symbolic
+Terminal=false
+Categories=Utility;GNOME;GTK;
+Keywords=pomodoro;timer;notion;tasks;productivity;
+StartupNotify=true

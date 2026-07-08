@@ -1,0 +1,45 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
+  <!-- canvas -->
+  <rect width="1280" height="640" fill="#1c1b25"/>
+  <defs>
+    <pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="16" cy="16" r="1" fill="#f6f5f4" opacity="0.05"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="640" fill="url(#dots)"/>
+
+  <!-- logo mark: timer ring, 25-minute progress arc, task check -->
+  <g>
+    <!-- base ring -->
+    <circle cx="300" cy="320" r="150" fill="none" stroke="#37343f" stroke-width="30"/>
+    <!-- progress arc: 25 of 60 minutes = 150° from 12 o'clock -->
+    <path d="M 300 170 A 150 150 0 0 1 375 449.9"
+          fill="none" stroke="#e01b24" stroke-width="30" stroke-linecap="round"/>
+    <!-- 12 o'clock tick -->
+    <line x1="300" y1="196" x2="300" y2="224" stroke="#f6f5f4" stroke-width="6" stroke-linecap="round" opacity="0.55"/>
+    <!-- task check -->
+    <path d="M 240 325 L 285 370 L 368 262"
+          fill="none" stroke="#f6f5f4" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- wordmark block -->
+  <g font-family="Cantarell, sans-serif">
+    <text x="560" y="252" font-size="24" font-weight="700" letter-spacing="8" fill="#e01b24">NOTION</text>
+    <text x="560" y="330" font-size="68" font-weight="800" fill="#f6f5f4">Pomodoro Tracker</text>
+    <text x="560" y="386" font-size="27" font-weight="400" fill="#9a97a5">Focus offline. Sync when ready.</text>
+  </g>
+
+  <!-- system chips -->
+  <g font-family="Noto Sans Mono, monospace">
+    <rect x="560" y="432" width="150" height="48" rx="24" fill="#2a2833"/>
+    <circle cx="590" cy="456" r="8" fill="#e01b24"/>
+    <text x="610" y="465" font-size="24" fill="#f6f5f4">25:00</text>
+
+    <rect x="726" y="432" width="304" height="48" rx="24" fill="none" stroke="#37343f" stroke-width="2"/>
+    <text x="752" y="463" font-size="20" fill="#9a97a5">Offline-first · GNOME</text>
+  </g>
+
+  <!-- footer detail -->
+  <text x="1240" y="608" text-anchor="end" font-family="Noto Sans Mono, monospace"
+        font-size="14" fill="#514e5c">com.frjr17.NotionPomodoroTracker</text>
+</svg>
