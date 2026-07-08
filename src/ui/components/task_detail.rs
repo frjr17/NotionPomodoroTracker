@@ -32,7 +32,7 @@ impl TaskDetail {
             .build();
 
         let placeholder = adw::StatusPage::builder()
-            .icon_name("checkbox-checked-symbolic")
+            .icon_name("object-select-symbolic")
             .title("No task selected")
             .description("Pick a task from the list to start tracking")
             .vexpand(true)

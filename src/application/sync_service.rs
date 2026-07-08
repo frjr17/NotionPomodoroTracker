@@ -100,18 +100,36 @@ pub fn run_sync(
         }
     }
 
-    // Dirty tasks whose pages vanished remotely (archived/deleted):
-    // ponytail: left local-only and logged; add re-create-or-archive flow if it ever matters
+    // Pages deleted or archived in Notion: remove their clean local mirrors.
+    // Tasks with unpushed local changes (or open conflicts) are kept and
+    // logged — never discard the user's work silently.
     let remote_ids: std::collections::HashSet<&str> =
         remotes.iter().map(|r| r.page_id.as_str()).collect();
-    for task in task_repo::list_dirty(conn)? {
-        if let Some(page_id) = &task.notion_page_id
-            && !remote_ids.contains(page_id.as_str())
-        {
+    let all = task_repo::list(
+        conn,
+        &task_repo::TaskFilter {
+            include_done: true,
+            ..Default::default()
+        },
+    )?;
+    for task in all {
+        let Some(page_id) = &task.notion_page_id else {
+            continue;
+        };
+        if remote_ids.contains(page_id.as_str()) {
+            continue;
+        }
+        if task.dirty || task.in_conflict() {
             let _ = sync_log_repo::info(
                 conn,
-                &format!("'{}' no longer exists in Notion; kept locally", task.title),
+                &format!(
+                    "'{}' was deleted in Notion; kept locally because it has unsynced changes",
+                    task.title
+                ),
             );
+        } else {
+            task_repo::delete(conn, &task.id)?;
+            report.deleted += 1;
         }
     }
 
@@ -119,10 +137,11 @@ pub fn run_sync(
     let _ = sync_log_repo::info(
         conn,
         &format!(
-            "sync done: {} new, {} updated, {} pushed, {} conflicts, {} errors",
+            "sync done: {} new, {} updated, {} pushed, {} removed, {} conflicts, {} errors",
             report.pulled_new,
             report.pulled_updated,
             report.pushed,
+            report.deleted,
             report.conflicts,
             report.errors.len()
         ),
@@ -390,6 +409,71 @@ mod tests {
         let report = run_sync(&conn, &newer, &settings, t0() + Duration::hours(5)).unwrap();
         assert_eq!(report.conflicts, 0);
         assert_eq!(report.pushed, 1);
+    }
+
+    #[test]
+    fn remote_deletion_removes_clean_local_task() {
+        let conn = open_in_memory().unwrap();
+        let settings = Settings::default();
+        run_sync(
+            &conn,
+            &FakeNotion::with(vec![remote("p1", "A", t0()), remote("p2", "B", t0())]),
+            &settings,
+            t0(),
+        )
+        .unwrap();
+
+        // "B" gets deleted in Notion: next sync only returns "A".
+        let report = run_sync(
+            &conn,
+            &FakeNotion::with(vec![remote("p1", "A", t0())]),
+            &settings,
+            t0() + Duration::hours(1),
+        )
+        .unwrap();
+        assert_eq!(report.deleted, 1);
+        let titles: Vec<String> = task_repo::list(&conn, &Default::default())
+            .unwrap()
+            .into_iter()
+            .map(|t| t.title)
+            .collect();
+        assert_eq!(titles, vec!["A".to_string()]);
+    }
+
+    #[test]
+    fn remote_deletion_keeps_task_with_unsynced_changes() {
+        let conn = open_in_memory().unwrap();
+        let settings = Settings::default();
+        run_sync(
+            &conn,
+            &FakeNotion::with(vec![remote("p1", "A", t0())]),
+            &settings,
+            t0(),
+        )
+        .unwrap();
+        let task_id = task_repo::list(&conn, &Default::default()).unwrap()[0]
+            .id
+            .clone();
+        task_service::rename(
+            &conn,
+            &task_id,
+            "A (local work)",
+            t0() + Duration::minutes(5),
+        )
+        .unwrap();
+
+        // Page deleted remotely while the local task is dirty → keep it.
+        let report = run_sync(
+            &conn,
+            &FakeNotion::with(vec![]),
+            &settings,
+            t0() + Duration::hours(1),
+        )
+        .unwrap();
+        assert_eq!(report.deleted, 0);
+        let task = task_repo::get(&conn, &task_id).unwrap().unwrap();
+        assert_eq!(task.title, "A (local work)");
+        assert!(task.dirty);
     }
 
     #[test]

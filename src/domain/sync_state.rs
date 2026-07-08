@@ -50,6 +50,8 @@ pub struct SyncReport {
     pub pulled_new: u32,
     pub pulled_updated: u32,
     pub pushed: u32,
+    /// Local tasks removed because their page was deleted/archived in Notion.
+    pub deleted: u32,
     pub conflicts: u32,
     pub errors: Vec<String>,
 }

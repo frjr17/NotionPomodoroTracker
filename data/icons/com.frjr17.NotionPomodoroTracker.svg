@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- App icon: the banner's timer-ring + check mark, sized for icon grids -->
+  <circle cx="64" cy="64" r="56" fill="#1c1b25"/>
+  <!-- base ring -->
+  <circle cx="64" cy="64" r="44" fill="none" stroke="#3a3846" stroke-width="9"/>
+  <!-- 25-of-60-minutes progress arc -->
+  <path d="M 64 20 A 44 44 0 0 1 86 102.1"
+        fill="none" stroke="#e01b24" stroke-width="9" stroke-linecap="round"/>
+  <!-- task check -->
+  <path d="M 46.4 65.5 L 59.6 78.7 L 83.9 47"
+        fill="none" stroke="#f6f5f4" stroke-width="8"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

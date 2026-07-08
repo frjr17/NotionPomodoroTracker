@@ -43,9 +43,28 @@ impl AppState {
 }
 
 pub fn run() -> gtk::glib::ExitCode {
-    let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(|app| match AppState::init() {
-        Ok(state) => crate::ui::windows::main_window::build(app, state).present(),
+    // Dev hook: NPT_AUTOCLOSE=<secs> runs a throwaway instance (doesn't join
+    // a running one) that quits by itself. Used for docs/design screenshots.
+    let autoclose: Option<u32> = std::env::var("NPT_AUTOCLOSE")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let mut flags = gtk::gio::ApplicationFlags::default();
+    if autoclose.is_some() {
+        flags |= gtk::gio::ApplicationFlags::NON_UNIQUE;
+    }
+    let app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(flags)
+        .build();
+    app.connect_activate(move |app| match AppState::init() {
+        Ok(state) => {
+            gtk::Window::set_default_icon_name(APP_ID);
+            crate::ui::windows::main_window::build(app, state).present();
+            if let Some(secs) = autoclose {
+                let app = app.clone();
+                gtk::glib::timeout_add_seconds_local_once(secs, move || app.quit());
+            }
+        }
         Err(e) => {
             eprintln!("failed to initialize app: {e}");
             app.quit();

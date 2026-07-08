@@ -49,6 +49,9 @@ impl TimerService {
         let minutes = self.timer.stop(now);
         if minutes > 0
             && let Some(task_id) = task_id
+            // The task may have been removed by a sync (deleted in Notion)
+            // while the timer was running; nothing left to credit then.
+            && task_repo::get(conn, &task_id)?.is_some()
         {
             let session = TimeSession::new(
                 &task_id,

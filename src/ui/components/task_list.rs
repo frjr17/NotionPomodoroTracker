@@ -47,13 +47,11 @@ impl TaskList {
             .spacing(6)
             .build();
         let status_filter = gtk::DropDown::from_strings(&[ALL]);
-        status_filter.set_tooltip_text(Some("Filter by status"));
         let priority_filter = gtk::DropDown::from_strings(&[ALL]);
-        priority_filter.set_tooltip_text(Some("Filter by priority"));
         let show_done = gtk::CheckButton::with_label("Done");
         show_done.set_tooltip_text(Some("Show completed tasks"));
-        filters.append(&status_filter);
-        filters.append(&priority_filter);
+        filters.append(&Self::labeled_filter("Status", &status_filter));
+        filters.append(&Self::labeled_filter("Priority", &priority_filter));
         filters.append(&show_done);
         root.append(&filters);
 
@@ -69,7 +67,8 @@ impl TaskList {
         root.append(&scroll);
 
         let new_task_entry = gtk::Entry::builder()
-            .placeholder_text("New local task — press Enter")
+            .placeholder_text("New task")
+            .tooltip_text("Add a local task (Enter)")
             .secondary_icon_name("list-add-symbolic")
             .build();
         root.append(&new_task_entry);
@@ -85,6 +84,27 @@ impl TaskList {
             statuses: RefCell::new(vec![]),
             priorities: RefCell::new(vec![]),
         }
+    }
+
+    /// Caption + dropdown column, with the caption doubling as the
+    /// dropdown's accessible label for screen readers.
+    fn labeled_filter(caption: &str, dd: &gtk::DropDown) -> gtk::Box {
+        let label = gtk::Label::builder()
+            .label(caption)
+            .css_classes(["caption", "dim-label"])
+            .halign(gtk::Align::Start)
+            .build();
+        dd.update_property(&[gtk::accessible::Property::Label(&format!(
+            "Filter by {}",
+            caption.to_lowercase()
+        ))]);
+        let column = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(2)
+            .build();
+        column.append(&label);
+        column.append(dd);
+        column
     }
 
     fn dropdown_value(dd: &gtk::DropDown, values: &[String]) -> Option<String> {
@@ -174,9 +194,13 @@ impl TaskList {
                 icon.set_tooltip_text(Some("Sync conflict — open task to resolve"));
                 row.add_suffix(&icon);
             } else if task.dirty {
-                let icon = gtk::Image::from_icon_name("document-edit-symbolic");
-                icon.set_tooltip_text(Some("Local changes pending sync"));
-                row.add_suffix(&icon);
+                // Text dot instead of a themed icon: icon themes like
+                // WhiteSur lack document-edit-symbolic and render a broken
+                // glyph; a label can never break.
+                let dot = gtk::Label::new(Some("•"));
+                dot.add_css_class("accent");
+                dot.set_tooltip_text(Some("Local changes pending sync"));
+                row.add_suffix(&dot);
             }
 
             let list_row = gtk::ListBoxRow::builder()

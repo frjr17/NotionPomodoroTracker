@@ -75,7 +75,7 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
     let title = adw::WindowTitle::new("Notion Pomodoro Tracker", "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
     let sync_btn = gtk::Button::builder()
-        .icon_name("emblem-synchronizing-symbolic")
+        .icon_name("view-refresh-symbolic")
         .tooltip_text("Sync Now")
         .build();
     let sync_spinner = gtk::Spinner::new();
@@ -123,6 +123,18 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
             });
         }
     });
+
+    // Restore the active task selection when a timer session survives a
+    // restart, so the user resumes exactly where they left off.
+    let restored_task = state.timer.borrow().timer.task_id.clone();
+    if let Some(task_id) = restored_task
+        && task_service::get(&state.conn, &task_id)
+            .ok()
+            .flatten()
+            .is_some()
+    {
+        *state.selected_task_id.borrow_mut() = Some(task_id);
+    }
 
     ui.refresh_all();
     window
@@ -388,10 +400,14 @@ fn wire_sync(ui: &Rc<Ui>, app: &adw::Application, sync_btn: &gtk::Button) {
             sync_controller::trigger(&ui.state, move |outcome| {
                 match &outcome {
                     SyncOutcome::Done(report) => {
-                        ui2.toast(&format!(
+                        let mut summary = format!(
                             "Synced — {} new, {} updated, {} pushed",
                             report.pulled_new, report.pulled_updated, report.pushed
-                        ));
+                        );
+                        if report.deleted > 0 {
+                            summary.push_str(&format!(", {} removed", report.deleted));
+                        }
+                        ui2.toast(&summary);
                         if report.conflicts > 0 {
                             ui2.toast(&format!(
                                 "{} task(s) in conflict — open them to resolve",
