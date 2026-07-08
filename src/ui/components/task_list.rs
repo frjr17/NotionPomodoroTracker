@@ -173,6 +173,7 @@ impl TaskList {
         for task in &tasks {
             let row = adw::ActionRow::builder()
                 .title(&task.title)
+                .use_markup(false)
                 .activatable(true)
                 .build();
             let mut subtitle: Vec<String> = vec![task.status.clone()];
