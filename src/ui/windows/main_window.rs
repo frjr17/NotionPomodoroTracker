@@ -83,7 +83,7 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
     header.pack_start(&sync_spinner);
     let settings_btn = gtk::Button::builder()
         .icon_name("emblem-system-symbolic")
-        .tooltip_text("Settings")
+        .tooltip_text("Settings (Ctrl+,)")
         .build();
     header.pack_end(&settings_btn);
 
@@ -124,15 +124,19 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
     });
     window.add_action(&focus_search);
     app.set_accels_for_action("win.focus-search", &["<Control>f"]);
-    settings_btn.connect_clicked({
+    let settings = gtk::gio::SimpleAction::new("settings", None);
+    settings.connect_activate({
         let ui = ui.clone();
-        move |_| {
+        move |_, _| {
             let ui = ui.clone();
             settings_window::show(&ui.window.clone(), &ui.state.clone(), move || {
                 ui.refresh_all()
             });
         }
     });
+    window.add_action(&settings);
+    app.set_accels_for_action("win.settings", &["<Control>comma"]);
+    settings_btn.set_action_name(Some("win.settings"));
 
     // Restore the active task selection when a timer session survives a
     // restart, so the user resumes exactly where they left off.
