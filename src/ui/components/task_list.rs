@@ -18,7 +18,8 @@ pub struct TaskList {
     priorities: RefCell<Vec<String>>,
 }
 
-const ALL: &str = "All";
+const ALL_STATUSES: &str = "All statuses";
+const ALL_PRIORITIES: &str = "All priorities";
 
 impl Default for TaskList {
     fn default() -> Self {
@@ -46,12 +47,14 @@ impl TaskList {
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)
             .build();
-        let status_filter = gtk::DropDown::from_strings(&[ALL]);
-        let priority_filter = gtk::DropDown::from_strings(&[ALL]);
+        let status_filter = gtk::DropDown::from_strings(&[ALL_STATUSES]);
+        let priority_filter = gtk::DropDown::from_strings(&[ALL_PRIORITIES]);
         let show_done = gtk::CheckButton::with_label("Done");
         show_done.set_tooltip_text(Some("Show completed tasks"));
-        filters.append(&Self::labeled_filter("Status", &status_filter));
-        filters.append(&Self::labeled_filter("Priority", &priority_filter));
+        Self::flat_filter("status", &status_filter);
+        Self::flat_filter("priority", &priority_filter);
+        filters.append(&status_filter);
+        filters.append(&priority_filter);
         filters.append(&show_done);
         root.append(&filters);
 
@@ -86,25 +89,17 @@ impl TaskList {
         }
     }
 
-    /// Caption + dropdown column, with the caption doubling as the
-    /// dropdown's accessible label for screen readers.
-    fn labeled_filter(caption: &str, dd: &gtk::DropDown) -> gtk::Box {
-        let label = gtk::Label::builder()
-            .label(caption)
-            .css_classes(["caption", "dim-label"])
-            .halign(gtk::Align::Start)
-            .build();
-        dd.update_property(&[gtk::accessible::Property::Label(&format!(
-            "Filter by {}",
-            caption.to_lowercase()
-        ))]);
-        let column = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(2)
-            .build();
-        column.append(&label);
-        column.append(dd);
-        column
+    /// Flat, self-labeling dropdown ("All statuses" when unset), so the row
+    /// reads as quiet toolbar text instead of raised boxes.
+    fn flat_filter(noun: &str, dd: &gtk::DropDown) {
+        dd.add_css_class("flat");
+        // Themes style button.flat, not dropdown.flat; flatten the inner button.
+        if let Some(button) = dd.first_child() {
+            button.add_css_class("flat");
+        }
+        let label = format!("Filter by {noun}");
+        dd.set_tooltip_text(Some(&label));
+        dd.update_property(&[gtk::accessible::Property::Label(&label)]);
     }
 
     fn dropdown_value(dd: &gtk::DropDown, values: &[String]) -> Option<String> {
@@ -143,16 +138,21 @@ impl TaskList {
         priorities.sort();
         priorities.dedup();
 
-        Self::update_dropdown(&self.status_filter, &self.statuses, statuses);
-        Self::update_dropdown(&self.priority_filter, &self.priorities, priorities);
+        Self::update_dropdown(&self.status_filter, ALL_STATUSES, &self.statuses, statuses);
+        Self::update_dropdown(&self.priority_filter, ALL_PRIORITIES, &self.priorities, priorities);
     }
 
-    fn update_dropdown(dd: &gtk::DropDown, current: &RefCell<Vec<String>>, values: Vec<String>) {
+    fn update_dropdown(
+        dd: &gtk::DropDown,
+        all_label: &str,
+        current: &RefCell<Vec<String>>,
+        values: Vec<String>,
+    ) {
         if *current.borrow() == values {
             return;
         }
         let selected = Self::dropdown_value(dd, &current.borrow());
-        let mut items: Vec<&str> = vec![ALL];
+        let mut items: Vec<&str> = vec![all_label];
         items.extend(values.iter().map(String::as_str));
         dd.set_model(Some(&gtk::StringList::new(&items)));
         if let Some(sel) = selected
