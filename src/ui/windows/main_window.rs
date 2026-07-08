@@ -76,7 +76,7 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
     let header = adw::HeaderBar::builder().title_widget(&title).build();
     let sync_btn = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
-        .tooltip_text("Sync Now")
+        .tooltip_text("Sync Now (Ctrl+R)")
         .build();
     let sync_spinner = gtk::Spinner::new();
     header.pack_start(&sync_btn);
@@ -114,6 +114,16 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
     wire_timer(&ui, app);
     wire_detail(&ui);
     wire_sync(&ui, app, &sync_btn);
+
+    let focus_search = gtk::gio::SimpleAction::new("focus-search", None);
+    focus_search.connect_activate({
+        let ui = ui.clone();
+        move |_, _| {
+            ui.task_list.search.grab_focus();
+        }
+    });
+    window.add_action(&focus_search);
+    app.set_accels_for_action("win.focus-search", &["<Control>f"]);
     settings_btn.connect_clicked({
         let ui = ui.clone();
         move |_| {
@@ -433,6 +443,14 @@ fn wire_sync(ui: &Rc<Ui>, app: &adw::Application, sync_btn: &gtk::Button) {
         let do_sync = do_sync.clone();
         move |_| do_sync()
     });
+
+    let sync_action = gtk::gio::SimpleAction::new("sync", None);
+    sync_action.connect_activate({
+        let do_sync = do_sync.clone();
+        move |_, _| do_sync()
+    });
+    ui.window.add_action(&sync_action);
+    app.set_accels_for_action("win.sync", &["<Control>r"]);
 
     // Auto-sync: checked every 5 minutes; only fires when enabled in settings.
     gtk::glib::timeout_add_seconds_local(300, {
