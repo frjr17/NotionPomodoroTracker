@@ -39,6 +39,17 @@ pub trait NotionApi {
         mappings: &PropertyMappings,
         now: DateTime<Utc>,
     ) -> Result<DateTime<Utc>, NotionError>;
+
+    /// Fetch the page body (block children) rendered as Markdown.
+    fn fetch_page_markdown(&self, page_id: &str) -> Result<String, NotionError>;
+
+    /// Replace the page body with blocks rendered from Markdown; returns the
+    /// page's new last_edited_time.
+    fn replace_page_body(
+        &self,
+        page_id: &str,
+        markdown: &str,
+    ) -> Result<DateTime<Utc>, NotionError>;
 }
 
 #[derive(Debug, Error)]
@@ -72,6 +83,7 @@ pub fn run_sync(
                 let mut task = Task::new_local(&remote.title, now);
                 task.notion_page_id = Some(remote.page_id.clone());
                 task_service::apply_remote(&mut task, remote);
+                pull_body(conn, api, &mut task, &remote.page_id);
                 task.last_synced_at = Some(now);
                 task_repo::upsert(conn, &task)?;
                 report.pulled_new += 1;
@@ -91,6 +103,7 @@ pub fn run_sync(
                     push_one(conn, api, settings, &mut local, now, &mut report);
                 } else if remote_changed {
                     task_service::apply_remote(&mut local, remote);
+                    pull_body(conn, api, &mut local, &remote.page_id);
                     local.last_synced_at = Some(now);
                     local.updated_at = now;
                     task_repo::upsert(conn, &local)?;
@@ -149,6 +162,20 @@ pub fn run_sync(
     Ok(report)
 }
 
+/// Pull the page body into `task.description`. A body-fetch failure is logged,
+/// not fatal — the properties still sync. Only called for new/changed pages.
+fn pull_body(conn: &Connection, api: &dyn NotionApi, task: &mut Task, page_id: &str) {
+    match api.fetch_page_markdown(page_id) {
+        Ok(md) => {
+            task.description = Some(md);
+            task.desc_dirty = false;
+        }
+        Err(e) => {
+            let _ = sync_log_repo::error(conn, &format!("fetch body '{}' failed: {e}", task.title));
+        }
+    }
+}
+
 fn push_one(
     conn: &Connection,
     api: &dyn NotionApi,
@@ -158,14 +185,38 @@ fn push_one(
     report: &mut SyncReport,
 ) {
     match api.push_task(local, &settings.mappings, now) {
-        Ok(new_last_edited) => {
+        Ok(mut new_last_edited) => {
             local.dirty = false;
+            // The page body rides along on the same dirty push, but only when
+            // the description itself changed (desc_dirty) — a pomodoro-only
+            // push must never rewrite (or, for an un-fetched body, wipe) it.
+            let mut body_ok = true;
+            if local.desc_dirty {
+                match (local.notion_page_id.clone(), local.description.clone()) {
+                    (Some(page_id), Some(desc)) => match api.replace_page_body(&page_id, &desc) {
+                        Ok(edited) => {
+                            local.desc_dirty = false;
+                            new_last_edited = new_last_edited.max(edited);
+                        }
+                        Err(e) => {
+                            body_ok = false;
+                            let msg = format!("push body '{}' failed: {e}", local.title);
+                            let _ = sync_log_repo::error(conn, &msg);
+                            report.errors.push(msg);
+                        }
+                    },
+                    _ => local.desc_dirty = false,
+                }
+            }
+            // If the body push failed, keep the task dirty so the next sync
+            // retries (re-pushing properties is idempotent).
+            local.dirty = !body_ok;
             local.notion_last_edited = Some(new_last_edited);
             local.last_synced_at = Some(now);
             local.updated_at = now;
             if let Err(e) = task_repo::upsert(conn, local) {
                 report.errors.push(format!("saving '{}': {e}", local.title));
-            } else {
+            } else if body_ok {
                 report.pushed += 1;
             }
         }
@@ -191,6 +242,8 @@ mod tests {
     struct FakeNotion {
         remotes: Vec<RemoteTask>,
         pushed: RefCell<Vec<String>>,
+        body_pushed: RefCell<Vec<String>>,
+        bodies: RefCell<std::collections::HashMap<String, String>>,
         fail_fetch: bool,
         fail_push: bool,
     }
@@ -200,6 +253,8 @@ mod tests {
             Self {
                 remotes,
                 pushed: RefCell::new(vec![]),
+                body_pushed: RefCell::new(vec![]),
+                bodies: RefCell::new(std::collections::HashMap::new()),
                 fail_fetch: false,
                 fail_push: false,
             }
@@ -234,6 +289,27 @@ mod tests {
                 .borrow_mut()
                 .push(task.notion_page_id.clone().unwrap());
             Ok(now)
+        }
+
+        fn fetch_page_markdown(&self, page_id: &str) -> Result<String, NotionError> {
+            Ok(self
+                .bodies
+                .borrow()
+                .get(page_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        fn replace_page_body(
+            &self,
+            page_id: &str,
+            markdown: &str,
+        ) -> Result<DateTime<Utc>, NotionError> {
+            self.body_pushed.borrow_mut().push(page_id.to_string());
+            self.bodies
+                .borrow_mut()
+                .insert(page_id.to_string(), markdown.to_string());
+            Ok(Utc::now())
         }
     }
 
@@ -284,6 +360,52 @@ mod tests {
         assert!(
             !task_repo::any_dirty(&conn).unwrap(),
             "dirty flag cleared after push"
+        );
+    }
+
+    #[test]
+    fn description_edit_pushes_body_and_clears_flags() {
+        let conn = open_in_memory().unwrap();
+        let api = FakeNotion::with(vec![remote("p1", "A", t0())]);
+        let settings = Settings::default();
+        run_sync(&conn, &api, &settings, t0()).unwrap();
+
+        let task_id = task_repo::list(&conn, &Default::default()).unwrap()[0]
+            .id
+            .clone();
+        task_service::edit_description(
+            &conn,
+            &task_id,
+            "# Notes\n\n- item",
+            t0() + Duration::hours(1),
+        )
+        .unwrap();
+
+        let report = run_sync(&conn, &api, &settings, t0() + Duration::hours(2)).unwrap();
+        assert_eq!(report.pushed, 1);
+        assert_eq!(*api.body_pushed.borrow(), vec!["p1".to_string()]);
+        let task = task_repo::get(&conn, &task_id).unwrap().unwrap();
+        assert!(!task.dirty, "dirty cleared after successful push");
+        assert!(!task.desc_dirty, "desc_dirty cleared after body push");
+    }
+
+    #[test]
+    fn pomodoro_push_does_not_rewrite_body() {
+        let conn = open_in_memory().unwrap();
+        let api = FakeNotion::with(vec![remote("p1", "A", t0())]);
+        let settings = Settings::default();
+        run_sync(&conn, &api, &settings, t0()).unwrap();
+
+        let task_id = task_repo::list(&conn, &Default::default()).unwrap()[0]
+            .id
+            .clone();
+        // A pomodoro sets dirty but not desc_dirty → body must be left alone.
+        task_repo::add_progress(&conn, &task_id, 1, 25, t0() + Duration::hours(1)).unwrap();
+
+        run_sync(&conn, &api, &settings, t0() + Duration::hours(2)).unwrap();
+        assert!(
+            api.body_pushed.borrow().is_empty(),
+            "counts-only push must not touch the page body"
         );
     }
 

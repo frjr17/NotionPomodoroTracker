@@ -157,7 +157,7 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
 fn load_css() {
     let provider = gtk::CssProvider::new();
     provider.load_from_string(
-        ".timer-display { font-size: 64px; font-weight: 300; font-feature-settings: 'tnum'; }",
+        ".timer-display { font-size: 64px; font-weight: 500; font-feature-settings: 'tnum'; }",
     );
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
@@ -368,6 +368,54 @@ fn wire_detail(ui: &Rc<Ui>) {
             conflict_dialog::show(&ui.window, &ui.state, &task, move || ui2.refresh_all());
         }
     });
+
+    // Editing any header field (title/status/priority/due) persists and marks
+    // the task dirty for the next sync.
+    ui.detail.connect_edited({
+        let ui = ui.clone();
+        move || {
+            let Some(id) = ui.state.selected_task_id.borrow().clone() else {
+                return;
+            };
+            let (title, status, priority, due) = ui.detail.current_edit();
+            if let Err(e) = task_service::edit_fields(
+                &ui.state.conn,
+                &id,
+                &title,
+                &status,
+                priority,
+                due,
+                Utc::now(),
+            ) {
+                ui.toast(&format!("Could not save changes: {e}"));
+            }
+            ui.refresh_all();
+        }
+    });
+
+    // Save the markdown description when the editor loses focus, if it changed.
+    let desc_focus = gtk::EventControllerFocus::new();
+    desc_focus.connect_leave({
+        let ui = ui.clone();
+        move |_| {
+            let Some(id) = ui.state.selected_task_id.borrow().clone() else {
+                return;
+            };
+            let text = ui.detail.description_text();
+            let Ok(Some(task)) = task_service::get(&ui.state.conn, &id) else {
+                return;
+            };
+            if task.description.unwrap_or_default() != text {
+                if let Err(e) =
+                    task_service::edit_description(&ui.state.conn, &id, &text, Utc::now())
+                {
+                    ui.toast(&format!("Could not save description: {e}"));
+                }
+                ui.refresh_all();
+            }
+        }
+    });
+    ui.detail.description_view.add_controller(desc_focus);
 }
 
 fn show_add_time_dialog(ui: &Rc<Ui>) {

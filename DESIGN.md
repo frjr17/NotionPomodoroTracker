@@ -27,7 +27,7 @@ and CSS classes so both themes work for free.
 - App-wide: system font (Cantarell on GNOME) via stock widgets; standard
   Adwaita classes for hierarchy: `title-2`, `title-4`, `heading`, `caption`,
   `dim-label`.
-- **Custom: `.timer-display`** — the countdown. 64px light (300), tabular
+- **Custom: `.timer-display`** — the countdown. 64px medium (500), tabular
   numerals (`font-feature-settings: 'tnum'`) so digits don't jitter each
   second. Defined in `main_window.rs::load_css()`. This is the app's single
   display-scale element; nothing else may exceed `title-1`.

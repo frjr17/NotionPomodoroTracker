@@ -36,9 +36,31 @@ pub fn remote_task_from_page(page: &Value, m: &PropertyMappings) -> Option<Remot
 /// properties still sync.
 pub fn build_push_properties(task: &Task, m: &PropertyMappings, now: DateTime<Utc>) -> Value {
     let mut props = serde_json::Map::new();
+    if !m.title.trim().is_empty() {
+        props.insert(
+            m.title.clone(),
+            json!({ "title": [{ "text": { "content": task.title } }] }),
+        );
+    }
     if !m.status.trim().is_empty() {
         let inner = json!({ "name": task.status });
         props.insert(m.status.clone(), json!({ m.status_type.as_str(): inner }));
+    }
+    // ponytail: priority assumed to be a Notion `select`, mirroring the pull
+    // side (`extract_select`). null clears it when the user removed the value.
+    if !m.priority.trim().is_empty() {
+        let select = match &task.priority {
+            Some(p) => json!({ "name": p }),
+            None => Value::Null,
+        };
+        props.insert(m.priority.clone(), json!({ "select": select }));
+    }
+    if !m.due_date.trim().is_empty() {
+        let date = match &task.due_date {
+            Some(d) => json!({ "start": d.to_string() }),
+            None => Value::Null,
+        };
+        props.insert(m.due_date.clone(), json!({ "date": date }));
     }
     if !m.pomodoro_count.trim().is_empty() {
         props.insert(
@@ -190,6 +212,23 @@ mod tests {
         assert_eq!(props["Pomodoros"]["number"], 4);
         assert!(props.get("Minutes").is_none());
         assert!(props.get("Last Synced").is_none());
+    }
+
+    #[test]
+    fn push_includes_title_priority_due() {
+        let mut task = Task::new_local("Ship it", Utc::now());
+        task.priority = Some("High".into());
+        task.due_date = Some("2026-07-15".parse().unwrap());
+        let props = build_push_properties(&task, &mappings(), Utc::now());
+        assert_eq!(props["Name"]["title"][0]["text"]["content"], "Ship it");
+        assert_eq!(props["Priority"]["select"]["name"], "High");
+        assert_eq!(props["Due"]["date"]["start"], "2026-07-15");
+
+        // Cleared values push explicit null so Notion unsets them.
+        let cleared = Task::new_local("T", Utc::now());
+        let props = build_push_properties(&cleared, &mappings(), Utc::now());
+        assert!(props["Priority"]["select"].is_null());
+        assert!(props["Due"]["date"].is_null());
     }
 
     #[test]

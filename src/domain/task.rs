@@ -12,10 +12,15 @@ pub struct Task {
     pub status: String,
     pub due_date: Option<NaiveDate>,
     pub priority: Option<String>,
+    /// Markdown mirror of the Notion page body. `None` until first fetched.
+    pub description: Option<String>,
     pub pomodoro_count: u32,
     pub tracked_minutes: u32,
     pub done: bool,
     pub dirty: bool,
+    /// Set only when the description was edited locally, so sync knows to
+    /// rewrite the page body (and never wipes an un-fetched body).
+    pub desc_dirty: bool,
     pub conflict_remote_json: Option<String>,
     pub notion_last_edited: Option<DateTime<Utc>>,
     pub last_synced_at: Option<DateTime<Utc>>,
@@ -32,10 +37,12 @@ impl Task {
             status: DEFAULT_STATUS.to_string(),
             due_date: None,
             priority: None,
+            description: None,
             pomodoro_count: 0,
             tracked_minutes: 0,
             done: false,
             dirty: false,
+            desc_dirty: false,
             conflict_remote_json: None,
             notion_last_edited: None,
             last_synced_at: None,

@@ -2,7 +2,7 @@ use crate::domain::sync_state::{ConflictResolution, RemoteTask};
 use crate::domain::task::{DONE_STATUS, Task};
 use crate::domain::time_session::{SessionKind, TimeSession};
 use crate::infrastructure::sqlite::{StoreError, StoreResult, session_repo, task_repo};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::Connection;
 
 pub use crate::infrastructure::sqlite::task_repo::TaskFilter;
@@ -28,6 +28,53 @@ pub fn rename(conn: &Connection, id: &str, title: &str, now: DateTime<Utc>) -> S
     task_repo::upsert(conn, &task)
 }
 
+/// Edit the header fields together (title/status/priority/due). Marks the task
+/// dirty so the edits push to Notion on next sync.
+pub fn edit_fields(
+    conn: &Connection,
+    id: &str,
+    title: &str,
+    status: &str,
+    priority: Option<String>,
+    due: Option<NaiveDate>,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let mut task = require(conn, id)?;
+    let title = title.trim().to_string();
+    let priority = priority.filter(|p| !p.trim().is_empty());
+    // No-op edits (e.g. focusing through the title, reselecting the same
+    // value) must not mark the task dirty.
+    if task.title == title
+        && task.status == status
+        && task.priority == priority
+        && task.due_date == due
+    {
+        return Ok(());
+    }
+    task.title = title;
+    task.status = status.to_string();
+    task.done = status == DONE_STATUS;
+    task.priority = priority;
+    task.due_date = due;
+    task.touch(now);
+    task_repo::upsert(conn, &task)
+}
+
+/// Save the (markdown) page body. Sets `desc_dirty` so sync rewrites the body,
+/// plus the normal dirty flag for conflict detection.
+pub fn edit_description(
+    conn: &Connection,
+    id: &str,
+    markdown: &str,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let mut task = require(conn, id)?;
+    task.description = Some(markdown.to_string());
+    task.desc_dirty = true;
+    task.touch(now);
+    task_repo::upsert(conn, &task)
+}
+
 pub fn set_done(conn: &Connection, id: &str, done: bool, now: DateTime<Utc>) -> StoreResult<()> {
     let mut task = require(conn, id)?;
     task.done = done;
@@ -44,6 +91,15 @@ pub fn delete(conn: &Connection, id: &str) -> StoreResult<()> {
 
 pub fn sessions(conn: &Connection, task_id: &str) -> StoreResult<Vec<TimeSession>> {
     session_repo::list_for_task(conn, task_id)
+}
+
+/// Distinct status / priority values seen locally, for edit-row choices.
+pub fn distinct_statuses(conn: &Connection) -> StoreResult<Vec<String>> {
+    task_repo::distinct_statuses(conn)
+}
+
+pub fn distinct_priorities(conn: &Connection) -> StoreResult<Vec<String>> {
+    task_repo::distinct_priorities(conn)
 }
 
 /// Manually add (or correct) tracked time. Negative minutes subtract, but
@@ -87,6 +143,9 @@ pub fn resolve_conflict(
                 .map_err(|e| StoreError::Corrupt(format!("bad conflict snapshot: {e}")))?;
             apply_remote(&mut task, &remote);
             task.dirty = false;
+            // ponytail: the conflict snapshot carries no body, so we drop the
+            // local body edit rather than re-fetch; next remote change pulls it.
+            task.desc_dirty = false;
             task.last_synced_at = Some(now);
         }
     }
@@ -152,6 +211,34 @@ mod tests {
 
         let open = list(&conn, &TaskFilter::default()).unwrap();
         assert!(open.is_empty(), "done tasks hidden by default");
+    }
+
+    #[test]
+    fn edit_fields_changes_dirty_but_noop_does_not() {
+        let conn = open_in_memory().unwrap();
+        let task = create(&conn, "T", now()).unwrap();
+        assert!(!task.dirty);
+
+        // Same values → no-op, stays clean.
+        edit_fields(&conn, &task.id, "T", "To Do", None, None, now()).unwrap();
+        assert!(!get(&conn, &task.id).unwrap().unwrap().dirty);
+
+        // Real change → dirty, fields updated.
+        edit_fields(
+            &conn,
+            &task.id,
+            "T2",
+            "In Progress",
+            Some("High".into()),
+            "2026-07-15".parse().ok(),
+            now(),
+        )
+        .unwrap();
+        let t = get(&conn, &task.id).unwrap().unwrap();
+        assert!(t.dirty);
+        assert_eq!(t.title, "T2");
+        assert_eq!(t.priority.as_deref(), Some("High"));
+        assert_eq!(t.due_date, "2026-07-15".parse().ok());
     }
 
     #[test]

@@ -18,7 +18,7 @@ pub struct TaskFilter {
 
 const COLS: &str = "id, notion_page_id, title, status, due_date, priority, pomodoro_count, \
     tracked_minutes, done, dirty, conflict_remote_json, notion_last_edited, last_synced_at, \
-    created_at, updated_at";
+    created_at, updated_at, description, desc_dirty";
 
 fn from_row(row: &Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -39,6 +39,8 @@ fn from_row(row: &Row) -> rusqlite::Result<Task> {
         last_synced_at: parse_ts(row.get::<_, Option<String>>(12)?),
         created_at: parse_ts(row.get::<_, Option<String>>(13)?).unwrap_or_default(),
         updated_at: parse_ts(row.get::<_, Option<String>>(14)?).unwrap_or_default(),
+        description: row.get(15)?,
+        desc_dirty: row.get(16)?,
     })
 }
 
@@ -55,13 +57,14 @@ pub fn upsert(conn: &Connection, task: &Task) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO tasks (id, notion_page_id, title, status, due_date, priority,
             pomodoro_count, tracked_minutes, done, dirty, conflict_remote_json,
-            notion_last_edited, last_synced_at, created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+            notion_last_edited, last_synced_at, created_at, updated_at, description,
+            desc_dirty)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
          ON CONFLICT(id) DO UPDATE SET
             notion_page_id=?2, title=?3, status=?4, due_date=?5, priority=?6,
             pomodoro_count=?7, tracked_minutes=?8, done=?9, dirty=?10,
             conflict_remote_json=?11, notion_last_edited=?12, last_synced_at=?13,
-            created_at=?14, updated_at=?15",
+            created_at=?14, updated_at=?15, description=?16, desc_dirty=?17",
         params![
             task.id,
             task.notion_page_id,
@@ -78,6 +81,8 @@ pub fn upsert(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.last_synced_at.as_ref().map(ts),
             ts(&task.created_at),
             ts(&task.updated_at),
+            task.description,
+            task.desc_dirty,
         ],
     )?;
     Ok(())
@@ -157,6 +162,14 @@ pub fn list_conflicted(conn: &Connection) -> StoreResult<Vec<Task>> {
 
 pub fn distinct_statuses(conn: &Connection) -> StoreResult<Vec<String>> {
     let mut stmt = conn.prepare("SELECT DISTINCT status FROM tasks ORDER BY status")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn distinct_priorities(conn: &Connection) -> StoreResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT priority FROM tasks WHERE priority IS NOT NULL ORDER BY priority",
+    )?;
     let rows = stmt.query_map([], |r| r.get(0))?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }

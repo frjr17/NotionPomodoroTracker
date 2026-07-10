@@ -139,7 +139,12 @@ impl TaskList {
         priorities.dedup();
 
         Self::update_dropdown(&self.status_filter, ALL_STATUSES, &self.statuses, statuses);
-        Self::update_dropdown(&self.priority_filter, ALL_PRIORITIES, &self.priorities, priorities);
+        Self::update_dropdown(
+            &self.priority_filter,
+            ALL_PRIORITIES,
+            &self.priorities,
+            priorities,
+        );
     }
 
     fn update_dropdown(
@@ -168,22 +173,42 @@ impl TaskList {
         let filter = self.current_filter();
         let tasks = task_service::list(&state.conn, &filter).unwrap_or_default();
         let selected_id = state.selected_task_id.borrow().clone();
+        let today = chrono::Local::now().date_naive();
 
         self.list.remove_all();
         for task in &tasks {
             let row = adw::ActionRow::builder()
                 .title(&task.title)
+                .subtitle(&task.status)
                 .use_markup(false)
                 .activatable(true)
                 .build();
-            let mut subtitle: Vec<String> = vec![task.status.clone()];
-            if let Some(due) = task.due_date {
-                subtitle.push(format!("due {due}"));
-            }
+
+            // Priority: a small state-colored dot (tooltip carries the label),
+            // so it reads at a glance without a noisy chip.
             if let Some(p) = &task.priority {
-                subtitle.push(p.clone());
+                let dot = gtk::Label::new(Some("●"));
+                dot.add_css_class(crate::ui::format::priority_dot_class(p));
+                dot.set_tooltip_text(Some(&format!("Priority: {p}")));
+                row.add_prefix(&dot);
             }
-            row.set_subtitle(&subtitle.join(" · "));
+
+            // Due date: humanized and colored only when overdue/soon. A done
+            // task is never "late" — show the plain date, dimmed.
+            if let Some(due) = task.due_date {
+                let (text, urgency) = if task.done {
+                    (
+                        due.format("%b %-d").to_string(),
+                        crate::ui::format::DueUrgency::Normal,
+                    )
+                } else {
+                    crate::ui::format::humanize_due(due, today)
+                };
+                let label = gtk::Label::new(Some(&text));
+                label.add_css_class(urgency.css_class());
+                label.set_tooltip_text(Some(&format!("Due {due}")));
+                row.add_suffix(&label);
+            }
 
             if task.pomodoro_count > 0 {
                 let badge = gtk::Label::new(Some(&format!("{} 🍅", task.pomodoro_count)));

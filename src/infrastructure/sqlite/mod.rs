@@ -92,5 +92,16 @@ fn init(conn: &Connection) -> StoreResult<()> {
             COMMIT;",
         )?;
     }
+    if version < 2 {
+        // Task description = markdown mirror of the Notion page body;
+        // desc_dirty flags a local body edit awaiting push.
+        conn.execute_batch(
+            "BEGIN;
+            ALTER TABLE tasks ADD COLUMN description TEXT;
+            ALTER TABLE tasks ADD COLUMN desc_dirty INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 2;
+            COMMIT;",
+        )?;
+    }
     Ok(())
 }
