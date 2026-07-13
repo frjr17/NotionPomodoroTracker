@@ -108,6 +108,16 @@ pub fn run_sync(
                     local.updated_at = now;
                     task_repo::upsert(conn, &local)?;
                     report.pulled_updated += 1;
+                } else if local.description.is_none() {
+                    // Backfill the page body for tasks synced before the
+                    // description feature existed: they are unchanged remotely,
+                    // so the branch above never runs. One-time — pull_body sets
+                    // the description (to "" for an empty body), so we don't
+                    // re-fetch on every sync.
+                    pull_body(conn, api, &mut local, &remote.page_id);
+                    if local.description.is_some() {
+                        task_repo::upsert(conn, &local)?;
+                    }
                 }
             }
         }
@@ -387,6 +397,31 @@ mod tests {
         let task = task_repo::get(&conn, &task_id).unwrap().unwrap();
         assert!(!task.dirty, "dirty cleared after successful push");
         assert!(!task.desc_dirty, "desc_dirty cleared after body push");
+    }
+
+    #[test]
+    fn backfills_description_for_pre_feature_task() {
+        let conn = open_in_memory().unwrap();
+        let api = FakeNotion::with(vec![remote("p1", "A", t0())]);
+        api.bodies
+            .borrow_mut()
+            .insert("p1".into(), "# Notes".into());
+
+        // A task synced before descriptions existed: no description, already
+        // up to date with the (unchanged) remote.
+        let mut task = Task::new_local("A", t0());
+        task.notion_page_id = Some("p1".into());
+        task.notion_last_edited = Some(t0());
+        task.last_synced_at = Some(t0());
+        task.description = None;
+        task_repo::upsert(&conn, &task).unwrap();
+
+        let settings = Settings::default();
+        run_sync(&conn, &api, &settings, t0() + Duration::hours(1)).unwrap();
+
+        let stored = task_repo::get(&conn, &task.id).unwrap().unwrap();
+        assert_eq!(stored.description.as_deref(), Some("# Notes"));
+        assert!(!stored.dirty, "backfill is a pull, not a local edit");
     }
 
     #[test]
