@@ -29,7 +29,11 @@ pub fn rename(conn: &Connection, id: &str, title: &str, now: DateTime<Utc>) -> S
 }
 
 /// Edit the header fields together (title/status/priority/due). Marks the task
-/// dirty so the edits push to Notion on next sync.
+/// dirty so the edits push to Notion on next sync. Returns `true` when a field
+/// actually changed — the caller must skip its UI refresh on a no-op, or the
+/// re-render's programmatic dropdown reselection echoes back as another "edit"
+/// and loops forever (gtk::DropDown delivers notify::selected asynchronously on
+/// some platforms, so a transient guard flag can't catch it).
 pub fn edit_fields(
     conn: &Connection,
     id: &str,
@@ -38,7 +42,7 @@ pub fn edit_fields(
     priority: Option<String>,
     due: Option<NaiveDate>,
     now: DateTime<Utc>,
-) -> StoreResult<()> {
+) -> StoreResult<bool> {
     let mut task = require(conn, id)?;
     let title = title.trim().to_string();
     let priority = priority.filter(|p| !p.trim().is_empty());
@@ -49,7 +53,7 @@ pub fn edit_fields(
         && task.priority == priority
         && task.due_date == due
     {
-        return Ok(());
+        return Ok(false);
     }
     task.title = title;
     task.status = status.to_string();
@@ -57,7 +61,8 @@ pub fn edit_fields(
     task.priority = priority;
     task.due_date = due;
     task.touch(now);
-    task_repo::upsert(conn, &task)
+    task_repo::upsert(conn, &task)?;
+    Ok(true)
 }
 
 /// Save the (markdown) page body. Sets `desc_dirty` so sync rewrites the body,
@@ -219,21 +224,24 @@ mod tests {
         let task = create(&conn, "T", now()).unwrap();
         assert!(!task.dirty);
 
-        // Same values → no-op, stays clean.
-        edit_fields(&conn, &task.id, "T", "To Do", None, None, now()).unwrap();
+        // Same values → no-op, stays clean, reports no change (the caller
+        // relies on this `false` to skip its refresh and avoid an edit loop).
+        assert!(!edit_fields(&conn, &task.id, "T", "To Do", None, None, now()).unwrap());
         assert!(!get(&conn, &task.id).unwrap().unwrap().dirty);
 
-        // Real change → dirty, fields updated.
-        edit_fields(
-            &conn,
-            &task.id,
-            "T2",
-            "In Progress",
-            Some("High".into()),
-            "2026-07-15".parse().ok(),
-            now(),
-        )
-        .unwrap();
+        // Real change → dirty, fields updated, reports the change.
+        assert!(
+            edit_fields(
+                &conn,
+                &task.id,
+                "T2",
+                "In Progress",
+                Some("High".into()),
+                "2026-07-15".parse().ok(),
+                now(),
+            )
+            .unwrap()
+        );
         let t = get(&conn, &task.id).unwrap().unwrap();
         assert!(t.dirty);
         assert_eq!(t.title, "T2");

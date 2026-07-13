@@ -378,7 +378,7 @@ fn wire_detail(ui: &Rc<Ui>) {
                 return;
             };
             let (title, status, priority, due) = ui.detail.current_edit();
-            if let Err(e) = task_service::edit_fields(
+            match task_service::edit_fields(
                 &ui.state.conn,
                 &id,
                 &title,
@@ -387,9 +387,21 @@ fn wire_detail(ui: &Rc<Ui>) {
                 due,
                 Utc::now(),
             ) {
-                ui.toast(&format!("Could not save changes: {e}"));
+                // Refresh only on a real change, and defer it out of the
+                // current signal emission: this callback runs inside the
+                // status/priority DropDown's own `selected` notify, and
+                // refresh_all() rebuilds that DropDown's model. Rebuilding a
+                // DropDown's model from inside its own selection signal
+                // re-enters GTK and crashes (SIGSEGV). idle_add runs the
+                // refresh after the signal finishes. (edit_fields returning
+                // false on no-ops stops the reselection echo from looping.)
+                Ok(true) => {
+                    let ui = ui.clone();
+                    gtk::glib::idle_add_local_once(move || ui.refresh_all());
+                }
+                Ok(false) => {}
+                Err(e) => ui.toast(&format!("Could not save changes: {e}")),
             }
-            ui.refresh_all();
         }
     });
 
