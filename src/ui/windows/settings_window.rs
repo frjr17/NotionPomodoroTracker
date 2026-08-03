@@ -304,10 +304,7 @@ fn sound_row(title: &str, current: &str) -> (adw::ActionRow, Rc<RefCell<String>>
 
     preview.connect_clicked({
         let selected = selected.clone();
-        move |button| {
-            let surface = button.native().and_then(|native| native.surface());
-            notifications::play_sound(&selected.borrow(), surface.as_ref());
-        }
+        move |_| notifications::play_sound(&selected.borrow())
     });
     reset.connect_clicked({
         let selected = selected.clone();

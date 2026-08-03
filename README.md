@@ -24,6 +24,8 @@ sudo dnf install gcc gtk4-devel libadwaita-devel libsecret-devel
 ```
 
 SQLite is bundled (rusqlite `bundled` feature) — no sqlite-devel needed.
+Custom notification audio uses the first available desktop player from
+`canberra-gtk-play`, `pw-play`, or `gst-play-1.0`.
 
 ## Development commands
 

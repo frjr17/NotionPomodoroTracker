@@ -3,11 +3,11 @@
 use gtk::gio;
 use gtk::prelude::*;
 use std::cell::RefCell;
+use std::process::{Child, Command, Stdio};
 
 thread_local! {
-    // Keep the media stream alive while it plays. Starting another sound
-    // intentionally replaces the previous one, avoiding overlapping alerts.
-    static ACTIVE_SOUND: RefCell<Option<(gtk::MediaFile, gtk::gdk::Surface)>> = const { RefCell::new(None) };
+    // Keep the player process so a new alert can stop an overlapping sound.
+    static ACTIVE_SOUND: RefCell<Option<Child>> = const { RefCell::new(None) };
 }
 
 pub fn notify(app: &impl IsA<gio::Application>, id: &str, title: &str, body: &str) {
@@ -20,44 +20,69 @@ pub fn notify(app: &impl IsA<gio::Application>, id: &str, title: &str, body: &st
 /// file. Invalid or unavailable files fail quietly so an alert can never
 /// disrupt timer progression.
 pub fn notify_with_sound(
-    app: &impl IsA<gtk::Application>,
+    app: &impl IsA<gio::Application>,
     id: &str,
     title: &str,
     body: &str,
     sound_path: &str,
 ) {
-    // Resolve the generic bound to the concrete GTK application first. A
-    // `gtk::Application` implements `IsA<gio::Application>`, but Rust cannot
-    // infer that relationship directly from `impl IsA<gtk::Application>`.
-    let gtk_app: &gtk::Application = app.as_ref();
-    notify(gtk_app, id, title, body);
-    let surface = gtk_app.active_window().and_then(|window| window.surface());
-    play_sound(sound_path, surface.as_ref());
+    notify(app, id, title, body);
+    play_sound(sound_path);
 }
 
-/// Play an audio file through GTK's media backend.
+/// Play an audio file using an installed desktop audio player.
 ///
-/// A standalone `MediaFile` must be realized against a surface before GTK
-/// allocates its playback resources. Without this step the stream appears to
-/// be playing but produces no audio.
-pub fn play_sound(sound_path: &str, surface: Option<&gtk::gdk::Surface>) {
+/// Playback runs out of process because a malformed file or a GStreamer plugin
+/// failure must never be able to abort the timer application. Fedora's GNOME
+/// installation normally provides at least one of these players.
+pub fn play_sound(sound_path: &str) {
     if sound_path.trim().is_empty() {
         return;
     }
-    let Some(surface) = surface else {
+    if !std::path::Path::new(sound_path).is_file() {
+        eprintln!("notification sound does not exist: {sound_path}");
         return;
-    };
-    let media = gtk::MediaFile::for_filename(sound_path);
-    media.realize(surface);
-    media.set_muted(false);
-    media.set_volume(1.0);
-    media.play();
+    }
+
     ACTIVE_SOUND.with(|active| {
-        if let Some((previous, previous_surface)) =
-            active.borrow_mut().replace((media, surface.clone()))
-        {
-            previous.pause();
-            previous.unrealize(&previous_surface);
+        let mut active = active.borrow_mut();
+        if let Some(mut previous) = active.take() {
+            if matches!(previous.try_wait(), Ok(None)) {
+                let _ = previous.kill();
+            }
+            let _ = previous.wait();
         }
+
+        *active = spawn_player(sound_path);
     });
+}
+
+fn spawn_player(sound_path: &str) -> Option<Child> {
+    // libcanberra integrates best with GNOME; PipeWire and GStreamer cover
+    // systems where canberra's command-line utility is not installed.
+    let players: [(&str, &[&str]); 3] = [
+        ("canberra-gtk-play", &["--file", sound_path]),
+        ("pw-play", &[sound_path]),
+        ("gst-play-1.0", &["--no-interactive", sound_path]),
+    ];
+    for (program, args) in players {
+        match Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => return Some(child),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                eprintln!("failed to start {program} for notification sound: {error}");
+                return None;
+            }
+        }
+    }
+    eprintln!(
+        "cannot play notification sound: install canberra-gtk-play, pw-play, or gst-play-1.0"
+    );
+    None
 }
