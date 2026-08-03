@@ -26,11 +26,12 @@ pub fn notify_with_sound(
     body: &str,
     sound_path: &str,
 ) {
-    notify(app, id, title, body);
-    let surface = app
-        .as_ref()
-        .active_window()
-        .and_then(|window| window.surface());
+    // Resolve the generic bound to the concrete GTK application first. A
+    // `gtk::Application` implements `IsA<gio::Application>`, but Rust cannot
+    // infer that relationship directly from `impl IsA<gtk::Application>`.
+    let gtk_app: &gtk::Application = app.as_ref();
+    notify(gtk_app, id, title, body);
+    let surface = gtk_app.active_window().and_then(|window| window.surface());
     play_sound(sound_path, surface.as_ref());
 }
 
