@@ -46,15 +46,27 @@ impl Default for PropertyMappings {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Settings {
     pub timer: TimerConfig,
+    pub notification_sounds: NotificationSounds,
     pub notion_database_id: String,
     pub mappings: PropertyMappings,
     pub auto_sync_enabled: bool,
+}
+
+/// Optional audio files played when a timer phase finishes. An empty path
+/// leaves sound handling to the desktop notification service.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct NotificationSounds {
+    #[serde(default)]
+    pub pomodoro_complete: String,
+    #[serde(default)]
+    pub break_finished: String,
 }
 
 const K_TIMER: &str = "timer_config";
 const K_DB_ID: &str = "notion_database_id";
 const K_MAPPINGS: &str = "property_mappings";
 const K_AUTO_SYNC: &str = "auto_sync_enabled";
+const K_NOTIFICATION_SOUNDS: &str = "notification_sounds";
 const K_TIMER_STATE: &str = "timer_state";
 const K_LAST_SYNC: &str = "last_sync_at";
 
@@ -72,6 +84,11 @@ pub fn load(conn: &Connection) -> StoreResult<Settings> {
         && let Ok(m) = serde_json::from_str(&json)
     {
         settings.mappings = m;
+    }
+    if let Some(json) = settings_repo::get(conn, K_NOTIFICATION_SOUNDS)?
+        && let Ok(sounds) = serde_json::from_str(&json)
+    {
+        settings.notification_sounds = sounds;
     }
     settings.auto_sync_enabled = settings_repo::get(conn, K_AUTO_SYNC)?.as_deref() == Some("true");
     Ok(settings)
@@ -97,6 +114,11 @@ pub fn save(conn: &Connection, settings: &Settings) -> StoreResult<()> {
         } else {
             "false"
         },
+    )?;
+    settings_repo::set(
+        conn,
+        K_NOTIFICATION_SOUNDS,
+        &serde_json::to_string(&settings.notification_sounds).unwrap(),
     )?;
     Ok(())
 }
@@ -155,6 +177,7 @@ mod tests {
         s.notion_database_id = "abc123".into();
         s.mappings.priority = String::new();
         s.auto_sync_enabled = true;
+        s.notification_sounds.pomodoro_complete = "/tmp/done.ogg".into();
         save(&conn, &s).unwrap();
         assert_eq!(load(&conn).unwrap(), s);
     }

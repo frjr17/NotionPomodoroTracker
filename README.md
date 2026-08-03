@@ -13,7 +13,8 @@ Pomodoro counts and tracked minutes back to Notion on demand.
 - Manual two-way Notion sync with conflict detection (keep local / keep
   Notion), optional auto-sync.
 - Notion token stored in the Secret Service keyring (libsecret), never on disk.
-- Desktop notifications for Pomodoro/break completion and sync failures.
+- Desktop notifications for Pomodoro/break completion and sync failures, with
+  separate customizable completion sounds.
 
 ## Fedora setup
 

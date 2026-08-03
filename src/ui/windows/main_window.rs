@@ -312,15 +312,20 @@ fn handle_timer_event(
                 .flatten()
                 .map(|t| t.title)
                 .unwrap_or_else(|| "task".into());
-            notifications::notify(
+            notifications::notify_with_sound(
                 app,
                 "pomodoro-done",
                 "Pomodoro complete 🍅",
                 &format!("{minutes} focused minutes on “{title}”. Break time!"),
+                &ui.state
+                    .settings
+                    .borrow()
+                    .notification_sounds
+                    .pomodoro_complete,
             );
         }
         Ok(Some(TimerEvent::BreakFinished { was_long })) => {
-            notifications::notify(
+            notifications::notify_with_sound(
                 app,
                 "break-done",
                 if was_long {
@@ -329,6 +334,11 @@ fn handle_timer_event(
                     "Break over"
                 },
                 "Ready for the next pomodoro?",
+                &ui.state
+                    .settings
+                    .borrow()
+                    .notification_sounds
+                    .break_finished,
             );
         }
         Ok(None) => {}

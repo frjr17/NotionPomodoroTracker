@@ -2,6 +2,7 @@
 //! with live validation and property mapping.
 
 use crate::application::settings_service::{self, PropertyMappings};
+use crate::infrastructure::notifications;
 use crate::infrastructure::notion::NotionClient;
 use crate::infrastructure::secret_store;
 use crate::ui::app::Shared;
@@ -89,6 +90,22 @@ pub fn show(parent: &impl IsA<gtk::Widget>, state: &Shared, on_closed: impl Fn()
         durations.add(r);
     }
     timer_page.add(&durations);
+
+    let sounds = adw::PreferencesGroup::builder()
+        .title("Notification sounds")
+        .description("Choose an audio file, or leave it on System default")
+        .build();
+    let (pomodoro_sound_row, pomodoro_sound) = sound_row(
+        "Pomodoro complete",
+        &settings.notification_sounds.pomodoro_complete,
+    );
+    let (break_sound_row, break_sound) = sound_row(
+        "Break finished",
+        &settings.notification_sounds.break_finished,
+    );
+    sounds.add(&pomodoro_sound_row);
+    sounds.add(&break_sound_row);
+    timer_page.add(&sounds);
 
     let sync_group = adw::PreferencesGroup::builder().title("Sync").build();
     let auto_sync_row = adw::SwitchRow::builder()
@@ -235,6 +252,8 @@ pub fn show(parent: &impl IsA<gtk::Widget>, state: &Shared, on_closed: impl Fn()
             settings.timer.short_break_minutes = short_row.value() as u32;
             settings.timer.long_break_minutes = long_row.value() as u32;
             settings.timer.pomodoros_until_long_break = cycle_row.value() as u32;
+            settings.notification_sounds.pomodoro_complete = pomodoro_sound.borrow().clone();
+            settings.notification_sounds.break_finished = break_sound.borrow().clone();
             settings.auto_sync_enabled = auto_sync_row.is_active();
             settings.notion_database_id = db_id_row.text().trim().to_string();
             rows.apply_to(&mut settings.mappings);
@@ -255,6 +274,94 @@ pub fn show(parent: &impl IsA<gtk::Widget>, state: &Shared, on_closed: impl Fn()
     });
 
     dialog.present(Some(parent));
+}
+
+fn sound_row(title: &str, current: &str) -> (adw::ActionRow, Rc<RefCell<String>>) {
+    let selected = Rc::new(RefCell::new(current.to_string()));
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .subtitle(sound_description(current))
+        .build();
+    let preview = gtk::Button::builder()
+        .icon_name("media-playback-start-symbolic")
+        .tooltip_text("Preview sound")
+        .valign(gtk::Align::Center)
+        .sensitive(!current.is_empty())
+        .build();
+    let reset = gtk::Button::builder()
+        .label("Default")
+        .tooltip_text("Use the system notification sound")
+        .valign(gtk::Align::Center)
+        .sensitive(!current.is_empty())
+        .build();
+    let choose = gtk::Button::builder()
+        .label("Choose…")
+        .valign(gtk::Align::Center)
+        .build();
+    row.add_suffix(&preview);
+    row.add_suffix(&reset);
+    row.add_suffix(&choose);
+
+    preview.connect_clicked({
+        let selected = selected.clone();
+        move |_| notifications::play_sound(&selected.borrow())
+    });
+    reset.connect_clicked({
+        let selected = selected.clone();
+        let row = row.clone();
+        let preview = preview.clone();
+        move |button| {
+            selected.borrow_mut().clear();
+            row.set_subtitle("System default");
+            preview.set_sensitive(false);
+            button.set_sensitive(false);
+        }
+    });
+    choose.connect_clicked({
+        let selected = selected.clone();
+        let row = row.clone();
+        let preview = preview.clone();
+        let reset = reset.clone();
+        move |_| {
+            let chooser = gtk::FileDialog::builder()
+                .title("Choose notification sound")
+                .accept_label("Choose")
+                .modal(true)
+                .build();
+            let selected = selected.clone();
+            let row = row.clone();
+            let preview = preview.clone();
+            let reset = reset.clone();
+            chooser.open(
+                None::<&gtk::Window>,
+                None::<&gtk::gio::Cancellable>,
+                move |result| {
+                    if let Ok(file) = result
+                        && let Some(path) = file.path()
+                    {
+                        let value = path.to_string_lossy().into_owned();
+                        row.set_subtitle(&sound_description(&value));
+                        *selected.borrow_mut() = value;
+                        preview.set_sensitive(true);
+                        reset.set_sensitive(true);
+                    }
+                },
+            );
+        }
+    });
+
+    (row, selected)
+}
+
+fn sound_description(path: &str) -> String {
+    if path.is_empty() {
+        return "System default".into();
+    }
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_string()
 }
 
 struct MappingRows {
