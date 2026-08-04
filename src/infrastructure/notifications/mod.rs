@@ -19,14 +19,18 @@ pub fn notify(app: &impl IsA<gio::Application>, id: &str, title: &str, body: &st
 /// file. Invalid or unavailable files fail quietly so an alert can never
 /// disrupt timer progression.
 pub fn notify_with_sound(
-    app: &impl IsA<gio::Application>,
+    app: &impl IsA<gtk::Application>,
     id: &str,
     title: &str,
     body: &str,
     sound_path: &str,
 ) {
-    notify(app, id, title, body);
-    play_sound(sound_path);
+    let gtk_app: &gtk::Application = app.as_ref();
+    notify(gtk_app, id, title, body);
+    let app_is_active = gtk_app
+        .active_window()
+        .is_some_and(|window| window.is_active());
+    play_sound(sound_path, !app_is_active);
 }
 
 /// Play an audio file on the default system output.
@@ -34,7 +38,7 @@ pub fn notify_with_sound(
 /// Decoding and playback run off the GTK thread. Rodio talks directly to the
 /// system audio device, so playback does not depend on optional command-line
 /// programs or GTK's GStreamer backend.
-pub fn play_sound(sound_path: &str) {
+pub fn play_sound(sound_path: &str, repeat: bool) {
     if sound_path.trim().is_empty() {
         return;
     }
@@ -46,26 +50,42 @@ pub fn play_sound(sound_path: &str) {
     let generation = SOUND_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
     let sound_path = sound_path.to_owned();
     std::thread::spawn(move || {
-        if let Err(error) = play_sound_file(&sound_path, generation) {
+        if let Err(error) = play_sound_file(&sound_path, generation, repeat) {
             eprintln!("failed to play notification sound {sound_path}: {error}");
         }
     });
 }
 
-fn play_sound_file(sound_path: &str, generation: u64) -> Result<(), Box<dyn std::error::Error>> {
+/// Stop the current alert, if any. Called whenever the application regains
+/// focus so background alerts continue until the user returns.
+pub fn stop_sound() {
+    SOUND_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
+fn play_sound_file(
+    sound_path: &str,
+    generation: u64,
+    repeat: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut output = rodio::OutputStreamBuilder::open_default_stream()?;
     output.log_on_drop(false);
-    let file = std::fs::File::open(sound_path)?;
-    let source = rodio::Decoder::try_from(file)?.take_duration(Duration::from_secs(10));
     let sink = rodio::Sink::connect_new(output.mixer());
-    sink.append(source);
 
-    while !sink.empty() {
-        if SOUND_GENERATION.load(Ordering::Relaxed) != generation {
-            sink.stop();
+    loop {
+        let file = std::fs::File::open(sound_path)?;
+        let source = rodio::Decoder::try_from(file)?.take_duration(Duration::from_secs(10));
+        sink.append(source);
+
+        while !sink.empty() {
+            if SOUND_GENERATION.load(Ordering::Relaxed) != generation {
+                sink.stop();
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !repeat {
             break;
         }
-        std::thread::sleep(Duration::from_millis(50));
     }
     Ok(())
 }

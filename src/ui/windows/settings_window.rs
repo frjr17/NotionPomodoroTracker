@@ -304,7 +304,7 @@ fn sound_row(title: &str, current: &str) -> (adw::ActionRow, Rc<RefCell<String>>
 
     preview.connect_clicked({
         let selected = selected.clone();
-        move |_| notifications::play_sound(&selected.borrow())
+        move |_| notifications::play_sound(&selected.borrow(), false)
     });
     reset.connect_clicked({
         let selected = selected.clone();

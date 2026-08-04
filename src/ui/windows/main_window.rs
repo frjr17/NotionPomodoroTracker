@@ -98,6 +98,11 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
         .default_height(680)
         .content(&toolbar)
         .build();
+    window.connect_is_active_notify(|window| {
+        if window.is_active() {
+            notifications::stop_sound();
+        }
+    });
 
     let ui = Rc::new(Ui {
         state: state.clone(),
