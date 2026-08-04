@@ -19,14 +19,13 @@ Pomodoro counts and tracked minutes back to Notion on demand.
 ## Fedora setup
 
 ```sh
-sudo dnf install gcc gtk4-devel libadwaita-devel libsecret-devel pipewire-utils
+sudo dnf install gcc gtk4-devel libadwaita-devel libsecret-devel alsa-lib-devel
 # Rust via rustup or dnf: sudo dnf install rust cargo
 ```
 
 SQLite is bundled (rusqlite `bundled` feature) — no sqlite-devel needed.
-Custom notification audio automatically tries available PipeWire/PulseAudio,
-libcanberra, FFmpeg, mpv, and GStreamer command-line players until one accepts
-the selected file. On Fedora, install `pipewire-utils` if `pw-play` is missing.
+Custom notification audio is decoded in-process and sent to the default system
+audio output; it does not require an external media-player command.
 
 ## Development commands
 

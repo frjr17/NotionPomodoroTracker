@@ -2,13 +2,12 @@
 
 use gtk::gio;
 use gtk::prelude::*;
-use std::cell::RefCell;
-use std::process::{Child, Command, Stdio};
+use rodio::Source;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
-thread_local! {
-    // Keep the player process so a new alert can stop an overlapping sound.
-    static ACTIVE_SOUND: RefCell<Option<Child>> = const { RefCell::new(None) };
-}
+// Incrementing this cancels any notification sound already playing.
+static SOUND_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 pub fn notify(app: &impl IsA<gio::Application>, id: &str, title: &str, body: &str) {
     let notification = gio::Notification::new(title);
@@ -30,11 +29,11 @@ pub fn notify_with_sound(
     play_sound(sound_path);
 }
 
-/// Play an audio file using an installed desktop audio player.
+/// Play an audio file on the default system output.
 ///
-/// Playback runs out of process because a malformed file or a GStreamer plugin
-/// failure must never be able to abort the timer application. Fedora's GNOME
-/// installation normally provides at least one of these players.
+/// Decoding and playback run off the GTK thread. Rodio talks directly to the
+/// system audio device, so playback does not depend on optional command-line
+/// programs or GTK's GStreamer backend.
 pub fn play_sound(sound_path: &str) {
     if sound_path.trim().is_empty() {
         return;
@@ -44,49 +43,29 @@ pub fn play_sound(sound_path: &str) {
         return;
     }
 
-    ACTIVE_SOUND.with(|active| {
-        let mut active = active.borrow_mut();
-        if let Some(mut previous) = active.take() {
-            if matches!(previous.try_wait(), Ok(None)) {
-                let _ = previous.kill();
-            }
-            let _ = previous.wait();
+    let generation = SOUND_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let sound_path = sound_path.to_owned();
+    std::thread::spawn(move || {
+        if let Err(error) = play_sound_file(&sound_path, generation) {
+            eprintln!("failed to play notification sound {sound_path}: {error}");
         }
-
-        *active = spawn_player(sound_path);
     });
 }
 
-fn spawn_player(sound_path: &str) -> Option<Child> {
-    // A program being present does not mean it can decode the selected file.
-    // Run the players in a helper process and fall through when one exits with
-    // an error (for example, libcanberra commonly rejects MP3 files). The path
-    // is passed as a positional argument rather than interpolated into this
-    // script, so spaces and shell metacharacters remain safe.
-    const SCRIPT: &str = r#"
-if command -v pw-play >/dev/null 2>&1 && pw-play "$1"; then exit 0; fi
-if command -v paplay >/dev/null 2>&1 && paplay "$1"; then exit 0; fi
-if command -v canberra-gtk-play >/dev/null 2>&1 && canberra-gtk-play --file="$1"; then exit 0; fi
-if command -v ffplay >/dev/null 2>&1 && ffplay -nodisp -autoexit -loglevel error "$1"; then exit 0; fi
-if command -v mpv >/dev/null 2>&1 && mpv --no-video --really-quiet "$1"; then exit 0; fi
-if command -v gst-play-1.0 >/dev/null 2>&1 && gst-play-1.0 --no-interactive "$1"; then exit 0; fi
-echo "cannot play notification sound: no installed player could decode $1" >&2
-exit 1
-"#;
+fn play_sound_file(sound_path: &str, generation: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let mut output = rodio::OutputStreamBuilder::open_default_stream()?;
+    output.log_on_drop(false);
+    let file = std::fs::File::open(sound_path)?;
+    let source = rodio::Decoder::try_from(file)?.take_duration(Duration::from_secs(10));
+    let sink = rodio::Sink::connect_new(output.mixer());
+    sink.append(source);
 
-    match Command::new("sh")
-        .args(["-c", SCRIPT, "notification-sound-player", sound_path])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        // Keep stderr visible: decoder and audio-server errors are actionable
-        // and should not be mistaken for a successful silent preview.
-        .stderr(Stdio::inherit())
-        .spawn()
-    {
-        Ok(child) => Some(child),
-        Err(error) => {
-            eprintln!("failed to start notification sound player: {error}");
-            None
+    while !sink.empty() {
+        if SOUND_GENERATION.load(Ordering::Relaxed) != generation {
+            sink.stop();
+            break;
         }
+        std::thread::sleep(Duration::from_millis(50));
     }
+    Ok(())
 }
