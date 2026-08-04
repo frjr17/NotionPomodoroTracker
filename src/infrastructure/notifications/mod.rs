@@ -58,31 +58,35 @@ pub fn play_sound(sound_path: &str) {
 }
 
 fn spawn_player(sound_path: &str) -> Option<Child> {
-    // libcanberra integrates best with GNOME; PipeWire and GStreamer cover
-    // systems where canberra's command-line utility is not installed.
-    let players: [(&str, &[&str]); 3] = [
-        ("canberra-gtk-play", &["--file", sound_path]),
-        ("pw-play", &[sound_path]),
-        ("gst-play-1.0", &["--no-interactive", sound_path]),
-    ];
-    for (program, args) in players {
-        match Command::new(program)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(child) => return Some(child),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                eprintln!("failed to start {program} for notification sound: {error}");
-                return None;
-            }
+    // A program being present does not mean it can decode the selected file.
+    // Run the players in a helper process and fall through when one exits with
+    // an error (for example, libcanberra commonly rejects MP3 files). The path
+    // is passed as a positional argument rather than interpolated into this
+    // script, so spaces and shell metacharacters remain safe.
+    const SCRIPT: &str = r#"
+if command -v pw-play >/dev/null 2>&1 && pw-play "$1"; then exit 0; fi
+if command -v paplay >/dev/null 2>&1 && paplay "$1"; then exit 0; fi
+if command -v canberra-gtk-play >/dev/null 2>&1 && canberra-gtk-play --file="$1"; then exit 0; fi
+if command -v ffplay >/dev/null 2>&1 && ffplay -nodisp -autoexit -loglevel error "$1"; then exit 0; fi
+if command -v mpv >/dev/null 2>&1 && mpv --no-video --really-quiet "$1"; then exit 0; fi
+if command -v gst-play-1.0 >/dev/null 2>&1 && gst-play-1.0 --no-interactive "$1"; then exit 0; fi
+echo "cannot play notification sound: no installed player could decode $1" >&2
+exit 1
+"#;
+
+    match Command::new("sh")
+        .args(["-c", SCRIPT, "notification-sound-player", sound_path])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        // Keep stderr visible: decoder and audio-server errors are actionable
+        // and should not be mistaken for a successful silent preview.
+        .stderr(Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => Some(child),
+        Err(error) => {
+            eprintln!("failed to start notification sound player: {error}");
+            None
         }
     }
-    eprintln!(
-        "cannot play notification sound: install canberra-gtk-play, pw-play, or gst-play-1.0"
-    );
-    None
 }
