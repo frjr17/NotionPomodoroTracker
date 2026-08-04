@@ -13,16 +13,38 @@ Pomodoro counts and tracked minutes back to Notion on demand.
 - Manual two-way Notion sync with conflict detection (keep local / keep
   Notion), optional auto-sync.
 - Notion token stored in the Secret Service keyring (libsecret), never on disk.
-- Desktop notifications for Pomodoro/break completion and sync failures.
+- Desktop notifications for Pomodoro/break completion and sync failures, with
+  separate customizable completion sounds.
 
-## Fedora setup
+## Linux setup
+
+Install the native dependencies for a supported RPM- or Debian-based
+distribution automatically:
 
 ```sh
-sudo dnf install gcc gtk4-devel libadwaita-devel libsecret-devel
+just setup-linux
+```
+
+Or install them directly:
+
+### Fedora/RHEL family
+
+```sh
+sudo dnf install gcc gtk4-devel libadwaita-devel libsecret-devel alsa-lib-devel
 # Rust via rustup or dnf: sudo dnf install rust cargo
 ```
 
+### Debian/Ubuntu family
+
+```sh
+sudo apt-get update
+sudo apt-get install build-essential libgtk-4-dev libadwaita-1-dev libsecret-1-dev libasound2-dev
+# Rust via rustup or apt: sudo apt install cargo
+```
+
 SQLite is bundled (rusqlite `bundled` feature) — no sqlite-devel needed.
+Custom notification audio is decoded in-process and sent to the default system
+audio output; it does not require an external media-player command.
 
 ## Development commands
 
@@ -42,6 +64,18 @@ A `justfile` is provided (`sudo dnf install just`), or use cargo directly:
 
 ```sh
 cargo run
+```
+
+If Cargo reports that `alsa.pc` or package `alsa` is missing, install the audio
+development files before building:
+
+```sh
+# Fedora/RHEL family:
+sudo dnf install alsa-lib-devel
+# Debian/Ubuntu family:
+sudo apt-get install libasound2-dev
+# Or install every development dependency for the detected distribution:
+just setup-linux
 ```
 
 First run: open **Settings** (gear icon), paste your Notion internal

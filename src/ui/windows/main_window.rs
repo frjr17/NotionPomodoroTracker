@@ -98,6 +98,11 @@ pub fn build(app: &adw::Application, state: Shared) -> adw::ApplicationWindow {
         .default_height(680)
         .content(&toolbar)
         .build();
+    window.connect_is_active_notify(|window| {
+        if window.is_active() {
+            notifications::stop_sound();
+        }
+    });
 
     let ui = Rc::new(Ui {
         state: state.clone(),
@@ -312,15 +317,20 @@ fn handle_timer_event(
                 .flatten()
                 .map(|t| t.title)
                 .unwrap_or_else(|| "task".into());
-            notifications::notify(
+            notifications::notify_with_sound(
                 app,
                 "pomodoro-done",
                 "Pomodoro complete 🍅",
                 &format!("{minutes} focused minutes on “{title}”. Break time!"),
+                &ui.state
+                    .settings
+                    .borrow()
+                    .notification_sounds
+                    .pomodoro_complete,
             );
         }
         Ok(Some(TimerEvent::BreakFinished { was_long })) => {
-            notifications::notify(
+            notifications::notify_with_sound(
                 app,
                 "break-done",
                 if was_long {
@@ -329,6 +339,11 @@ fn handle_timer_event(
                     "Break over"
                 },
                 "Ready for the next pomodoro?",
+                &ui.state
+                    .settings
+                    .borrow()
+                    .notification_sounds
+                    .break_finished,
             );
         }
         Ok(None) => {}
