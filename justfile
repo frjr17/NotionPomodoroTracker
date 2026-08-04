@@ -1,4 +1,11 @@
+setup-fedora:
+    sudo dnf install gcc gtk4-devel libadwaita-devel libsecret-devel alsa-lib-devel
+
 dev:
+    @if ! pkg-config --exists alsa; then \
+        echo "Missing ALSA development files. Run: just setup-fedora" >&2; \
+        exit 1; \
+    fi
     cargo run
 
 test:

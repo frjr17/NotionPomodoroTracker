@@ -47,6 +47,15 @@ A `justfile` is provided (`sudo dnf install just`), or use cargo directly:
 cargo run
 ```
 
+If Cargo reports that `alsa.pc` or package `alsa` is missing, install the audio
+development files before building:
+
+```sh
+sudo dnf install alsa-lib-devel
+# Or install every development dependency at once:
+just setup-fedora
+```
+
 First run: open **Settings** (gear icon), paste your Notion internal
 integration token and database ID, validate, and map properties. See
 [NOTION_SETUP.md](NOTION_SETUP.md).
